@@ -50,6 +50,13 @@ ul{padding-left:20px;margin:0 0 14px}li{margin-bottom:6px}
 <script>
 /* ===== CONFIG ===== */
 var ENDPOINT = ""; // paste your Google Apps Script web app URL here (see setup notes)
+/* Google Form (answers). Fill the two empty entry IDs once you have them (see notes). */
+var FORM = {
+  url:"https://docs.google.com/forms/d/e/1FAIpQLSdQdRonIgnqnHSeLN7SsTOh-gbSJf0HYLO6qu1l65OEJRLxqQ/formResponse",
+  user:"entry.666635079", id:"entry.1326789710",
+  mode:"",    // e.g. "entry.1111111111" (optional field for Easy/Hard)
+  answers:""  // e.g. "entry.2222222222" (field that receives the answers)
+};
 var TIME = {easy:300, hard:200};
 var COOLDOWN = 120; // seconds
 var LABELS = ["A","B","C","D"];
@@ -61,7 +68,7 @@ var QUESTIONS = {easy:placeholders(15), hard:placeholders(15)};
 var app=document.getElementById("app");
 var S={mode:null,user:"",mid:"",i:0,answers:[],left:0,t:null};
 var params=new URLSearchParams(location.search);
-var pre={user:(params.get("user_name")||"").trim(),mid:(params.get("mem_id")||"").trim()};
+var pre={user:(params.get(FORM.user)||params.get("user_name")||"").trim(),mid:(params.get(FORM.id)||params.get("mem_id")||"").trim()};
 
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
@@ -153,6 +160,13 @@ function next(){
 function finish(){
   window.onbeforeunload=null;
   ls("last:"+S.user.toLowerCase(),String(Date.now()));
+  if(FORM.url){
+    var fd=new URLSearchParams();
+    fd.set(FORM.user,S.user);fd.set(FORM.id,S.mid);
+    if(FORM.mode)fd.set(FORM.mode,S.mode);
+    if(FORM.answers)fd.set(FORM.answers,S.answers.map(function(a,k){return (k+1)+":"+(a<0?"-":LABELS[a])}).join(", "));
+    fetch(FORM.url,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).catch(function(){});
+  }
   api("submit",{username:S.user,mem_id:S.mid,mode:S.mode,answers:S.answers.map(function(a){return a<0?"":LABELS[a]}),time:new Date().toISOString()}).catch(function(){});
   app.innerHTML='<h1>Your answer is submitted</h1><p>Thank you for taking part. Don’t forget to reply on the forum.</p>'+
   '<p class="mute">You can take the quiz again after a 2 minute cooldown.</p>';
