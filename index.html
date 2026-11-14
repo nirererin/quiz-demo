@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MAL Community Quiz</title>
+<style>
+:root{--bg:#f6f4ef;--card:#fff;--ink:#1d1b18;--mute:#6b665e;--line:#ddd8cd;--acc:#2e51a2;--accink:#fff;--warn:#b3261e;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14151a;--card:#1d1f27;--ink:#eceae4;--mute:#9a978f;--line:#33363f;--acc:#7d9cf0;--accink:#10131c;--warn:#ff8a80}}
+:root[data-theme="dark"]{--bg:#14151a;--card:#1d1f27;--ink:#eceae4;--mute:#9a978f;--line:#33363f;--acc:#7d9cf0;--accink:#10131c;--warn:#ff8a80}
+*,*::before,*::after{box-sizing:inherit}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+main{width:100%;max-width:560px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px}
+h1{font-size:1.7rem;margin:0 0 6px;letter-spacing:-.01em}
+h2{font-size:1.2rem;margin:0 0 12px}
+p{margin:0 0 14px}
+.mute{color:var(--mute);font-size:.9rem}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:12px 18px;min-height:44px}
+button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+button.primary{background:var(--acc);color:var(--accink);border-color:var(--acc);font-weight:600}
+button:disabled{opacity:.5;cursor:not-allowed}
+.mode{flex:1;min-width:200px;text-align:left}
+.mode b{display:block;font-size:1.05rem}
+.mode:hover{border-color:var(--acc)}
+label{display:block;font-weight:600;margin:14px 0 6px}
+input[type=text]{width:100%;font:inherit;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+input[readonly]{opacity:.75}
+.err{color:var(--warn);min-height:1.4em;margin:10px 0 0;font-size:.92rem}
+.warn{border:1px solid var(--warn);border-radius:10px;padding:12px 14px;color:var(--warn);margin:14px 0}
+ul{padding-left:20px;margin:0 0 14px}li{margin-bottom:6px}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:.92rem}
+.timer{font-variant-numeric:tabular-nums;font-weight:700}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-bottom:16px}
+.bar i{display:block;height:100%;background:var(--acc);width:100%;transition:width 1s linear}
+.img{aspect-ratio:16/9;background:var(--bg);border:1px dashed var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--mute);margin-bottom:16px;overflow:hidden}
+.img img{width:100%;height:100%;object-fit:contain}
+.opt{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;cursor:pointer}
+.opt:has(input:checked){border-color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,transparent)}
+.opt input{accent-color:var(--acc);width:18px;height:18px}
+.foot{display:flex;justify-content:flex-end;margin-top:14px}
+.count{margin-top:22px;padding-top:14px;border-top:1px solid var(--line);font-size:.88rem}
+.big{font-size:2.2rem;font-weight:700;font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+</style>
+</head>
+<body>
+<main id="app" aria-live="polite"></main>
+<script>
+/* ===== CONFIG ===== */
+var ENDPOINT = ""; // paste your Google Apps Script web app URL here (see setup notes)
+var TIME = {easy:300, hard:200};
+var COOLDOWN = 120; // seconds
+var LABELS = ["A","B","C","D"];
+function placeholders(n){var a=[];for(var i=1;i<=n;i++)a.push({img:"",options:["Option A","Option B","Option C","Option D"]});return a;}
+/* Replace with your own: {img:"https://…", options:["…","…","…","…"]} */
+var QUESTIONS = {easy:placeholders(15), hard:placeholders(15)};
+/* ================== */
+
+var app=document.getElementById("app");
+var S={mode:null,user:"",mid:"",i:0,answers:[],left:0,t:null};
+var params=new URLSearchParams(location.search);
+var pre={user:(params.get("user_name")||"").trim(),mid:(params.get("mem_id")||"").trim()};
+
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
+function api(action,data){
+  if(!ENDPOINT)return Promise.reject(new Error("no endpoint"));
+  if(data)return fetch(ENDPOINT,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(data)}).then(function(r){return r.json()});
+  return fetch(ENDPOINT+"?action="+action+"&user="+encodeURIComponent(S.user)).then(function(r){return r.json()});
+}
+function fmt(s){return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
+
+/* Welcome + visitor counter (each load counts) */
+function welcome(){
+  app.innerHTML='<h1>Welcome</h1><p class="mute">A short community quiz. Press Enter to choose your mode.</p>'+
+  '<button class="primary" id="enter">Enter</button>'+
+  '<div class="count mute">Page visitors: <b id="vc">…</b></div>';
+  document.getElementById("enter").onclick=modes;
+  api("visit").then(function(r){document.getElementById("vc").textContent=r.count})
+  .catch(function(){var n=(parseInt(ls("vc"),10)||0)+1;ls("vc",n);document.getElementById("vc").textContent=n});
+}
+function modes(){
+  app.innerHTML='<h2>Select a mode</h2><div class="row">'+
+  '<button class="mode" data-m="easy"><b>Easy</b><span class="mute">'+TIME.easy+' seconds per question</span></button>'+
+  '<button class="mode" data-m="hard"><b>Hard</b><span class="mute">'+TIME.hard+' seconds per question</span></button></div>';
+  app.querySelectorAll(".mode").forEach(function(b){b.onclick=function(){S.mode=b.dataset.m;identity()}});
+}
+function identity(){
+  var uLock=!!pre.user, mLock=!!pre.mid;
+  app.innerHTML='<h2>Your details</h2>'+
+  '<label for="u">MAL username</label><input type="text" id="u" autocomplete="off" value="'+esc(pre.user)+'"'+(uLock?" readonly":"")+'>'+
+  '<label for="m">MAL ID <span class="mute">(optional)</span></label><input type="text" id="m" inputmode="numeric" autocomplete="off" value="'+esc(pre.mid)+'"'+(mLock?" readonly":"")+'>'+
+  '<p class="err" id="err" role="alert"></p><div class="row"><button class="primary" id="go">Continue</button></div>';
+  document.getElementById("go").onclick=function(){
+    var u=document.getElementById("u").value.trim(), err=document.getElementById("err"), btn=this;
+    if(!u){err.textContent="Please enter your MAL username to continue.";return}
+    S.user=u;S.mid=document.getElementById("m").value.trim();
+    btn.disabled=true;err.textContent="";
+    cooldown().then(function(w){
+      if(w>0){err.textContent="Please wait "+fmt(w)+" before entering again.";btn.disabled=false}
+      else instructions();
+    });
+  };
+}
+function cooldown(){
+  var key="last:"+S.user.toLowerCase();
+  return api("check").then(function(r){return r.wait||0}).catch(function(){
+    var last=parseInt(ls(key),10)||0, w=COOLDOWN-Math.floor((Date.now()-last)/1000);return w>0?w:0});
+}
+function instructions(){
+  app.innerHTML='<h2>Instructions ('+(S.mode==="easy"?"Easy":"Hard")+')</h2><ul>'+
+  '<li>'+QUESTIONS[S.mode].length+' multiple-choice questions, one per page.</li>'+
+  '<li>Each question has '+TIME[S.mode]+' seconds. The timer starts when the question appears.</li>'+
+  '<li>When time runs out you move on automatically. You can also press Next at any time.</li>'+
+  '<li>No hints and no results are shown. Your answers are only submitted at the end.</li></ul>'+
+  '<div class="warn"><b>Warning:</b> there is no going back. Once you press Next, you cannot return to a previous question, and refreshing the page will end your attempt.</div>'+
+  '<button class="primary" id="start">Start quiz</button>';
+  document.getElementById("start").onclick=start;
+}
+function start(){
+  S.i=0;S.answers=[];
+  history.pushState({q:1},"");
+  window.addEventListener("popstate",function(){history.pushState({q:1},"")});
+  window.onbeforeunload=function(e){e.preventDefault();e.returnValue=""};
+  question();
+}
+function question(){
+  clearInterval(S.t);
+  var qs=QUESTIONS[S.mode], q=qs[S.i], total=TIME[S.mode], last=S.i===qs.length-1;
+  S.left=total;
+  app.innerHTML='<div class="top"><span>Question '+(S.i+1)+' of '+qs.length+'</span><span class="timer" id="tm">'+fmt(total)+'</span></div>'+
+  '<div class="bar"><i id="br"></i></div>'+
+  '<div class="img">'+(q.img?'<img alt="Question '+(S.i+1)+' image" src="'+esc(q.img)+'">':'Image for question '+(S.i+1))+'</div>'+
+  q.options.map(function(o,k){return '<label class="opt"><input type="radio" name="o" value="'+k+'"><span><b>'+LABELS[k]+'.</b> '+esc(o)+'</span></label>'}).join("")+
+  '<div class="foot"><button class="primary" id="nx">'+(last?"Submit":"Next")+'</button></div>';
+  document.getElementById("nx").onclick=next;
+  S.t=setInterval(function(){
+    S.left--;
+    document.getElementById("tm").textContent=fmt(S.left);
+    document.getElementById("br").style.width=(S.left/total*100)+"%";
+    if(S.left<=0)next();
+  },1000);
+}
+function next(){
+  clearInterval(S.t);
+  var c=app.querySelector("input[name=o]:checked");
+  S.answers.push(c?parseInt(c.value,10):-1);
+  S.i++;
+  if(S.i>=QUESTIONS[S.mode].length)finish();else question();
+}
+function finish(){
+  window.onbeforeunload=null;
+  ls("last:"+S.user.toLowerCase(),String(Date.now()));
+  api("submit",{username:S.user,mem_id:S.mid,mode:S.mode,answers:S.answers.map(function(a){return a<0?"":LABELS[a]}),time:new Date().toISOString()}).catch(function(){});
+  app.innerHTML='<h1>Your answer is submitted</h1><p>Thank you for taking part. Don’t forget to reply on the forum.</p>'+
+  '<p class="mute">You can take the quiz again after a 2 minute cooldown.</p>';
+}
+welcome();
+</script>
+</body>
+</html>
