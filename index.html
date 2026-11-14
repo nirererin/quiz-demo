@@ -57,6 +57,8 @@ var FORM = {
   mode:"",    // e.g. "entry.1111111111" (optional field for Easy/Hard)
   answers:""  // e.g. "entry.2222222222" (field that receives the answers)
 };
+/* MAL OAuth: create an app at myanimelist.net/apiconfig, App Type "web", and set its Redirect URL to the exact URL of this page. */
+var MAL = {clientId:"", redirect:location.origin+location.pathname};
 var TIME = {easy:300, hard:200};
 var COOLDOWN = 120; // seconds
 var LABELS = ["A","B","C","D"];
@@ -68,7 +70,8 @@ var QUESTIONS = {easy:placeholders(15), hard:placeholders(15)};
 var app=document.getElementById("app");
 var S={mode:null,user:"",mid:"",i:0,answers:[],left:0,t:null};
 var params=new URLSearchParams(location.search);
-var pre={user:(params.get(FORM.user)||params.get("user_name")||"").trim(),mid:(params.get(FORM.id)||params.get("mem_id")||"").trim()};
+function clean(v){v=(v||"").trim();return /[{}]|%7B|%7D/i.test(v)?"":v} /* ignore unreplaced {placeholders} */
+var pre={user:clean(params.get(FORM.user)||params.get("user_name")),mid:clean(params.get(FORM.id)||params.get("mem_id"))};
 
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
@@ -94,7 +97,32 @@ function modes(){
   '<button class="mode" data-m="hard"><b>Hard</b><span class="mute">'+TIME.hard+' seconds per question</span></button></div>';
   app.querySelectorAll(".mode").forEach(function(b){b.onclick=function(){S.mode=b.dataset.m;identity()}});
 }
+function ss(k,v){try{if(v===undefined)return sessionStorage.getItem(k);sessionStorage.setItem(k,v)}catch(e){return null}}
+function rand(n){var c="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~",a=new Uint8Array(n),o="";crypto.getRandomValues(a);for(var i=0;i<n;i++)o+=c[a[i]%c.length];return o}
 function identity(){
+  if(!MAL.clientId)return manualIdentity();
+  app.innerHTML='<h2>Log in with MyAnimeList</h2><p>Log in so we can verify your MAL username. We only read your username and ID.</p>'+
+  '<p class="err" id="err" role="alert">'+(ENDPOINT?"":"Setup incomplete: ENDPOINT is not set.")+'</p><button class="primary" id="li"'+(ENDPOINT?"":" disabled")+'>Log in with MyAnimeList</button>';
+  document.getElementById("li").onclick=function(){
+    var v=rand(64),st=rand(24);
+    ss("mal_v",v);ss("mal_s",st);ss("mal_mode",S.mode);
+    location.href="https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id="+encodeURIComponent(MAL.clientId)+"&state="+st+"&redirect_uri="+encodeURIComponent(MAL.redirect)+"&code_challenge="+v+"&code_challenge_method=plain";
+  };
+}
+function onReturn(code,state){
+  var v=ss("mal_v"),st=ss("mal_s");S.mode=ss("mal_mode");
+  history.replaceState(null,"",location.pathname);
+  app.innerHTML='<p>Verifying your MyAnimeList account…</p>';
+  if(!code||!v||state!==st||!S.mode){app.innerHTML='<h2>Login failed</h2><p>Please try again.</p><button class="primary" id="r">Back to start</button>';document.getElementById("r").onclick=welcome;return}
+  fetch(ENDPOINT+"?action=login&code="+encodeURIComponent(code)+"&verifier="+encodeURIComponent(v)+"&redirect="+encodeURIComponent(MAL.redirect)).then(function(r){return r.json()}).then(function(r){
+    if(!r.name)throw 0;
+    S.user=r.name;S.mid=String(r.id||"");
+    app.innerHTML='<h2>Logged in</h2><p>Username: <b>'+esc(S.user)+'</b><br>MAL ID: <b>'+esc(S.mid)+'</b></p><p class="err" id="err" role="alert"></p><button class="primary" id="go">Continue</button>';
+    document.getElementById("go").onclick=function(){var b=this,e=document.getElementById("err");b.disabled=true;
+      cooldown().then(function(w){if(w>0){e.textContent="Please wait "+fmt(w)+" before entering again.";b.disabled=false}else instructions()})};
+  }).catch(function(){app.innerHTML='<h2>Login failed</h2><p>Please try again.</p><button class="primary" id="r">Back to start</button>';document.getElementById("r").onclick=welcome});
+}
+function manualIdentity(){
   var uLock=!!pre.user, mLock=!!pre.mid;
   app.innerHTML='<h2>Your details</h2>'+
   '<label for="u">MAL username</label><input type="text" id="u" autocomplete="off" value="'+esc(pre.user)+'"'+(uLock?" readonly":"")+'>'+
@@ -171,7 +199,7 @@ function finish(){
   app.innerHTML='<h1>Your answer is submitted</h1><p>Thank you for taking part. Don’t forget to reply on the forum.</p>'+
   '<p class="mute">You can take the quiz again after a 2 minute cooldown.</p>';
 }
-welcome();
+if(MAL.clientId&&params.get("code"))onReturn(params.get("code"),params.get("state"));else welcome();
 </script>
 </body>
 </html>
